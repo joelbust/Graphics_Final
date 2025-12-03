@@ -1,4 +1,4 @@
-import { Group, BoxGeometry, MeshStandardMaterial, Mesh, CylinderGeometry, CircleGeometry, MeshBasicMaterial, Vector3 } from 'three';
+import { Group, BoxGeometry, MeshStandardMaterial, Mesh, CylinderGeometry, CircleGeometry, MeshBasicMaterial, Vector3, SpotLight } from 'three';
 
 class Car extends Group {
     constructor(inputState) {
@@ -25,8 +25,9 @@ class Car extends Group {
         this.autoDrive = true;
 
         // Body pieces
-        const bodyMaterial = new MeshStandardMaterial({ color: 0xff5533, metalness: 0.15, roughness: 0.55 });
-        const accentMaterial = new MeshStandardMaterial({ color: 0x1a1c1f, metalness: 0.4, roughness: 0.45 });
+        const bodyMaterial = new MeshStandardMaterial({ color: 0xff6347, metalness: 0.18, roughness: 0.52 });
+        const accentMaterial = new MeshStandardMaterial({ color: 0x1a1c1f, metalness: 0.5, roughness: 0.38 });
+        const trimMaterial = new MeshStandardMaterial({ color: 0xd7d9de, metalness: 0.6, roughness: 0.35 });
 
         const chassis = new Mesh(new BoxGeometry(1.9, 0.5, 3.2), bodyMaterial);
         chassis.castShadow = true;
@@ -37,6 +38,7 @@ class Car extends Group {
         cabin.castShadow = true;
         cabin.receiveShadow = true;
         cabin.position.set(0, 0.95, -0.15);
+        cabin.scale.set(0.92, 1, 0.95); // slight taper for roofline
 
         const hood = new Mesh(new BoxGeometry(1.6, 0.25, 1.2), bodyMaterial);
         hood.castShadow = true;
@@ -47,6 +49,32 @@ class Car extends Group {
         spoiler.castShadow = true;
         spoiler.receiveShadow = true;
         spoiler.position.set(0, 0.9, 1.5);
+
+        // Mirrors
+        const mirrorGeo = new BoxGeometry(0.15, 0.08, 0.3);
+        const mirrorL = new Mesh(mirrorGeo, trimMaterial);
+        mirrorL.position.set(-0.95, 0.8, -0.6);
+        mirrorL.castShadow = true;
+        mirrorL.receiveShadow = true;
+        const mirrorR = mirrorL.clone();
+        mirrorR.position.x = 0.95;
+
+        // Front grille + bumper trim
+        const grilleGeo = new BoxGeometry(1.2, 0.2, 0.06);
+        const grille = new Mesh(grilleGeo, accentMaterial);
+        grille.position.set(0, 0.55, -1.7);
+        grille.castShadow = true;
+        grille.receiveShadow = true;
+
+        const bumperGeo = new BoxGeometry(1.4, 0.12, 0.08);
+        const frontBumper = new Mesh(bumperGeo, trimMaterial);
+        frontBumper.position.set(0, 0.4, -1.72);
+        const rearBumper = frontBumper.clone();
+        rearBumper.position.z = 1.72;
+        [frontBumper, rearBumper].forEach((b) => {
+            b.castShadow = true;
+            b.receiveShadow = true;
+        });
 
         // Lights
         const headLightMaterial = new MeshStandardMaterial({ color: 0xfff6d5, emissive: 0xfff6d5, emissiveIntensity: 0.8, roughness: 0.4, metalness: 0.05 });
@@ -70,8 +98,12 @@ class Car extends Group {
         wheelGeometry.rotateZ(Math.PI / 2);
         const rimGeometry = new CylinderGeometry(0.26, 0.26, 0.12, 16);
         rimGeometry.rotateZ(Math.PI / 2);
+        const spokeGeometry = new BoxGeometry(0.05, 0.05, 0.24);
+        const tireBandGeometry = new CylinderGeometry(0.41, 0.41, 0.012, 24);
+        tireBandGeometry.rotateZ(Math.PI / 2);
         const wheelMaterial = new MeshStandardMaterial({ color: 0x0f0f10, metalness: 0.35, roughness: 0.9 });
         const rimMaterial = new MeshStandardMaterial({ color: 0xc0c5ce, metalness: 0.8, roughness: 0.25 });
+        const spokeMaterial = new MeshStandardMaterial({ color: 0xf2f2f2, metalness: 0.6, roughness: 0.35 });
 
         const frontPivotPositions = [
             [-0.9, 0.3, -1.2],
@@ -88,37 +120,81 @@ class Car extends Group {
         this.wheelSpin = 0;
         this.dustPuffs = [];
         this.dustTimer = 0;
+        this.headLights = this.createHeadLights();
 
         frontPivotPositions.forEach(([x, y, z]) => {
             const pivot = new Group();
             pivot.position.set(x, y, z);
-            const wheel = new Mesh(wheelGeometry, wheelMaterial);
-            const rim = new Mesh(rimGeometry, rimMaterial);
-            wheel.castShadow = true;
-            wheel.receiveShadow = true;
-            rim.castShadow = true;
-            rim.receiveShadow = true;
-            pivot.add(wheel, rim);
+        const assembly = this.createWheelAssembly(
+            wheelGeometry,
+            rimGeometry,
+            spokeGeometry,
+            wheelMaterial,
+            rimMaterial,
+            spokeMaterial,
+            tireBandGeometry
+        );
+            pivot.add(assembly);
             this.frontWheelPivots.push(pivot);
-            this.wheels.push(wheel, rim);
+            this.wheels.push(assembly);
             this.add(pivot);
         });
 
         rearPositions.forEach(([x, y, z]) => {
             const wheelGroup = new Group();
             wheelGroup.position.set(x, y, z);
-            const wheel = new Mesh(wheelGeometry, wheelMaterial);
-            const rim = new Mesh(rimGeometry, rimMaterial);
-            wheel.castShadow = true;
-            wheel.receiveShadow = true;
-            rim.castShadow = true;
-            rim.receiveShadow = true;
-            wheelGroup.add(wheel, rim);
-            this.wheels.push(wheel, rim);
+            const assembly = this.createWheelAssembly(
+                wheelGeometry,
+                rimGeometry,
+                spokeGeometry,
+                wheelMaterial,
+                rimMaterial,
+                spokeMaterial,
+                tireBandGeometry
+            );
+            wheelGroup.add(assembly);
+            this.wheels.push(assembly);
             this.add(wheelGroup);
         });
 
-        this.add(chassis, cabin, hood, spoiler, ...headlights, ...taillights);
+        this.add(
+            chassis,
+            cabin,
+            hood,
+            spoiler,
+            mirrorL,
+            mirrorR,
+            grille,
+            frontBumper,
+            rearBumper,
+            ...headlights,
+            ...taillights,
+            ...this.headLights
+        );
+    }
+
+    createHeadLights() {
+        const lights = [];
+        const positions = [
+            [-0.45, 0.7, -1.65],
+            [0.45, 0.7, -1.65],
+        ];
+        positions.forEach(([x, y, z]) => {
+            const l = new SpotLight(0xfff6d5, 0, 16, Math.PI / 6, 0.35, 1);
+            l.position.set(x, y, z);
+            l.target.position.set(x, y - 0.1, z - 3.5);
+            l.castShadow = false;
+            lights.push(l);
+            this.add(l.target);
+        });
+        return lights;
+    }
+
+    setHeadLights(on) {
+        const intensity = on ? 3 : 0;
+        this.headLights.forEach((l) => {
+            l.intensity = intensity;
+        });
     }
 
     setSpeedMultiplier(multiplier) {
@@ -184,7 +260,7 @@ class Car extends Group {
         const travel = this.state.velocity * delta;
         this.wheelSpin += travel / this.wheelRadius;
         this.wheels.forEach((wheel) => {
-            wheel.rotation.x = this.wheelSpin;
+            wheel.rotation.x = -this.wheelSpin;
         });
 
         this.updateDust(delta);
@@ -254,6 +330,37 @@ class Car extends Group {
                 puff.mesh.userData.velocity.y -= 0.6 * delta;
             }
         }
+    }
+
+    createWheelAssembly(wheelGeometry, rimGeometry, spokeGeometry, wheelMaterial, rimMaterial, spokeMaterial, tireBandGeometry) {
+        const assembly = new Group();
+        const tire = new Mesh(wheelGeometry, wheelMaterial);
+        const rim = new Mesh(rimGeometry, rimMaterial);
+        tire.castShadow = true;
+        tire.receiveShadow = true;
+        rim.castShadow = true;
+        rim.receiveShadow = true;
+        assembly.add(tire, rim);
+
+        // Subtle tire bands to show rotation
+        const bandMat = new MeshStandardMaterial({ color: 0x1f1f22, metalness: 0.2, roughness: 0.65 });
+        const bandPositions = [-0.12, -0.04, 0.04, 0.12];
+        bandPositions.forEach((x) => {
+            const band = new Mesh(tireBandGeometry, bandMat);
+            band.position.x = x;
+            assembly.add(band);
+        });
+
+        const spokeCount = 6;
+        for (let i = 0; i < spokeCount; i += 1) {
+            const spoke = new Mesh(spokeGeometry, spokeMaterial);
+            const angle = (i / spokeCount) * Math.PI * 2;
+            const radius = 0.18;
+            spoke.position.set(Math.cos(angle) * radius, Math.sin(angle) * radius, 0);
+            spoke.rotation.z = angle;
+            assembly.add(spoke);
+        }
+        return assembly;
     }
 }
 

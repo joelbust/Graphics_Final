@@ -32,7 +32,7 @@ class DrivingScene extends Scene {
             roadWidth: 18,
             roadStartOffset: -40,
             intersectionSpacing: 2,
-            intersectionChance: 0.8,
+            intersectionChance: 1.0,
             gameState: 'idle', // idle | playing | gameover
             cameraMode: 'menu', // menu | follow
             startOverlay: null,
@@ -450,7 +450,7 @@ class DrivingScene extends Scene {
 
     spawnTrafficCars(startZ, endZ, width = this.state.roadWidth) {
         const cars = [];
-        const count = 1 + Math.floor(Math.random() * 2); // 1-2 cars
+        const count = 2 + Math.floor(Math.random() * 2); // 2-3 cars
         const midZ = (startZ + endZ) / 2;
         const crossLength = width * 8;
         for (let i = 0; i < count; i += 1) {
@@ -463,6 +463,7 @@ class DrivingScene extends Scene {
                 direction: dir,
             });
             trafficCar.position.set(startX, 0, midZ + zOffset);
+            trafficCar.setHeadLights(this.state.mode === 'night');
             this.add(trafficCar);
             cars.push(trafficCar);
         }
@@ -947,12 +948,14 @@ class DrivingScene extends Scene {
             this.fog.density = 0.01;
             this.sun.visible = true;
             this.moon.visible = false;
+            this.car.setHeadLights(false);
         } else {
             this.background.set(0x0c1625);
             this.fog.color.set(0x0b1020);
             this.fog.density = 0.015;
             this.sun.visible = false;
             this.moon.visible = true;
+            this.car.setHeadLights(true);
         }
 
         if (this.fog) {
