@@ -900,8 +900,8 @@ class DrivingScene extends Scene {
         const left = makeBtn('◄', () => (this.state.input.left = true), () => (this.state.input.left = false));
         const right = makeBtn('►', () => (this.state.input.right = true), () => (this.state.input.right = false));
 
-        Object.assign(left.style, { position: 'absolute', bottom: '20px', left: '20px' });
-        Object.assign(right.style, { position: 'absolute', bottom: '20px', right: '20px' });
+        Object.assign(left.style, { position: 'absolute', top: '50%', left: '20px', transform: 'translateY(-50%)' });
+        Object.assign(right.style, { position: 'absolute', top: '50%', right: '20px', transform: 'translateY(-50%)' });
 
         container.appendChild(left);
         container.appendChild(right);
