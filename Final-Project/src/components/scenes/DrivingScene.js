@@ -46,6 +46,7 @@ class DrivingScene extends Scene {
             fixedDelta: 1 / 60,
             warmupUntil: null,
             warmupDuration: 0,
+            touchControls: null,
         };
 
         this.background = new Color(0x223247);
@@ -80,6 +81,7 @@ class DrivingScene extends Scene {
         this.ensureSegments();
         this.initHUD();
         this.initUI();
+        this.initTouchControls();
         this.showStartOverlay();
         this.applyMode(this.state.mode);
     }
@@ -851,6 +853,60 @@ class DrivingScene extends Scene {
         this.state.gameOverOverlay = gameOverOverlay;
         this.state.gameOverScoreEl = gameOverScore;
         this.refreshModeButtons();
+    }
+
+    initTouchControls() {
+        const container = document.createElement('div');
+        Object.assign(container.style, {
+            position: 'fixed',
+            inset: '0',
+            pointerEvents: 'none',
+            zIndex: '15',
+        });
+
+        const makeBtn = (label, onPress, onRelease) => {
+            const btn = document.createElement('div');
+            Object.assign(btn.style, {
+                width: '58px',
+                height: '58px',
+                background: 'rgba(20,25,35,0.72)',
+                color: '#f5f7ff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: '12px',
+                fontFamily: 'monospace',
+                fontSize: '20px',
+                userSelect: 'none',
+                pointerEvents: 'auto',
+                touchAction: 'none',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+            });
+            btn.innerText = label;
+            const start = (e) => {
+                e.preventDefault();
+                onPress();
+            };
+            const end = (e) => {
+                e.preventDefault();
+                onRelease();
+            };
+            btn.addEventListener('touchstart', start);
+            btn.addEventListener('touchend', end);
+            btn.addEventListener('touchcancel', end);
+            return btn;
+        };
+
+        const left = makeBtn('◄', () => (this.state.input.left = true), () => (this.state.input.left = false));
+        const right = makeBtn('►', () => (this.state.input.right = true), () => (this.state.input.right = false));
+
+        Object.assign(left.style, { position: 'absolute', bottom: '20px', left: '20px' });
+        Object.assign(right.style, { position: 'absolute', bottom: '20px', right: '20px' });
+
+        container.appendChild(left);
+        container.appendChild(right);
+        document.body.appendChild(container);
+        this.state.touchControls = container;
     }
 
     createModeButton(label, mode) {
