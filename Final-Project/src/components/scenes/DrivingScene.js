@@ -6,6 +6,16 @@ class DrivingScene extends Scene {
     constructor() {
         super();
 
+        // Supabase REST endpoint placeholders (replace with your project values)
+        this.SUPA_URL = 'https://cwsrnxaauwshypovpxdb.supabase.co';
+        this.SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN3c3JueGFhdXdzaHlwb3ZweGRiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ3ODYwMDIsImV4cCI6MjA4MDM2MjAwMn0.48mSY3EnQx1KlCjuMvhN36fXr-HnxnbLrhrE4WWRQEI';
+        this.SUPA_SCORE_ENDPOINT = `${this.SUPA_URL}/rest/v1/scores`;
+        this.SUPA_HEADERS = {
+            'Content-Type': 'application/json',
+            apikey: this.SUPA_KEY,
+            Authorization: `Bearer ${this.SUPA_KEY}`,
+        };
+
         this.state = {
             updateList: [],
             input: {
@@ -37,6 +47,8 @@ class DrivingScene extends Scene {
             cameraMode: 'menu', // menu | follow
             startOverlay: null,
             gameOverOverlay: null,
+            scoreListEl: null,
+            playerName: 'Guest',
             mode: 'night',
             modeButtons: {
                 day: [],
@@ -448,18 +460,30 @@ class DrivingScene extends Scene {
         return { crossRoad, crossLines, crossSideLines: sideLines };
     }
 
-    spawnTrafficCars(startZ, endZ, width = this.state.roadWidth) {
+    spawnTrafficCars(startZ, endZ, width = this.state.roadWidth, playerSpeed = 0, playerEta = 2) {
+        // Occasionally skip traffic so some intersections are empty
+        if (Math.random() < 0.45) return [];
+
         const cars = [];
-        const count = 2 + Math.floor(Math.random() * 2); // 2-3 cars
+        const count = 1 + Math.floor(Math.random() * 4); // 1-4 cars
         const midZ = (startZ + endZ) / 2;
         const crossLength = width * 8;
+        const baseSpeed = 5.2 + Math.random() * 1.3; // ~5.2–6.5
+        const speedBoost = Math.min(1.6, playerSpeed * 0.08);
         for (let i = 0; i < count; i += 1) {
             const dir = Math.random() < 0.5 ? 1 : -1;
-            const startX = dir > 0 ? -(crossLength / 2 + 12) : crossLength / 2 + 12;
+            // Try to time the crossing to the player's arrival
+            const carSpeed = baseSpeed + speedBoost;
+            // Jitter timing so some are early/late when you reach the intersection
+            const timingJitter = (Math.random() - 0.5) * 1.8; // ~-0.9s to +0.9s
+            const eta = Math.max(0.25, playerEta + timingJitter);
+            // Give them plenty of runway so they visibly drive in
+            const desiredDist = Math.max(12, Math.min(crossLength / 2 + 40, carSpeed * Math.max(0.6, eta + 0.8)));
+            const startX = dir > 0 ? -desiredDist : desiredDist;
             const zOffset = (Math.random() - 0.5) * 8;
             const trafficCar = new TrafficCar({
                 color: Math.random() < 0.5 ? 0x4a8bd7 : 0xd76d4a,
-                speed: 8 + Math.random() * 6,
+                speed: carSpeed,
                 direction: dir,
             });
             trafficCar.position.set(startX, 0, midZ + zOffset);
@@ -471,11 +495,15 @@ class DrivingScene extends Scene {
     }
 
     activateTraffic() {
-        const currentIndex = Math.max(0, Math.floor((this.state.roadStartOffset - this.car.position.z) / this.state.segmentLength));
+        const playerSpeed = Math.max(0.1, Math.abs(this.car.state.velocity));
+        // Allow activation farther out so cars have time to drive in
+        const leadDistance = Math.max(40, Math.min(140, playerSpeed * 4 + 50));
         for (const segment of this.state.segments.values()) {
             if (!segment.isIntersection || segment.trafficActivated) continue;
-            if (segment.index <= currentIndex + 5) {
-                const cars = this.spawnTrafficCars(segment.startZ, segment.endZ, this.state.roadWidth);
+            const ahead = this.car.position.z - segment.midZ; // positive means intersection ahead of player
+            if (ahead >= 0 && ahead <= leadDistance) {
+                const eta = playerSpeed > 0.1 ? ahead / playerSpeed : 2;
+                const cars = this.spawnTrafficCars(segment.startZ, segment.endZ, this.state.roadWidth, playerSpeed, eta);
                 segment.trafficCars = cars;
                 segment.trafficActivated = true;
                 segment.obstacles.push(...cars);
@@ -592,6 +620,7 @@ class DrivingScene extends Scene {
         this.state.gameState = 'gameover';
         this.ensureSegments();
         this.updateHUD(this.state.score, 1);
+        this.persistAndLoadScores();
         this.showGameOverOverlay();
     }
 
@@ -747,6 +776,53 @@ class DrivingScene extends Scene {
         this.state.hudEl.innerText = `Score: ${score} | Speed x${speedMultiplier.toFixed(2)}`;
     }
 
+    async persistAndLoadScores(skipSave = false) {
+        // Skip if Supabase placeholders are not set
+        if (this.SUPA_URL.includes('YOUR_PROJECT') || this.SUPA_KEY.includes('YOUR_ANON_KEY')) return;
+        if (!skipSave) {
+            try {
+                await this.saveScore(this.state.playerName || 'Guest', this.state.score);
+            } catch (e) {
+                // ignore network errors for now
+            }
+        }
+        try {
+            const scores = await this.loadTopScores();
+            this.renderLeaderboard(scores);
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    async saveScore(name, score) {
+        const payload = { name: name || 'Guest', score: Math.floor(score || 0) };
+        return fetch(this.SUPA_SCORE_ENDPOINT, {
+            method: 'POST',
+            headers: this.SUPA_HEADERS,
+            body: JSON.stringify(payload),
+        });
+    }
+
+    async loadTopScores() {
+        const res = await fetch(
+            `${this.SUPA_SCORE_ENDPOINT}?select=name,score&order=score.desc&limit=10`,
+            { headers: this.SUPA_HEADERS }
+        );
+        if (!res.ok) return [];
+        return res.json();
+    }
+
+    renderLeaderboard(scores) {
+        if (!this.state.scoreListEl) return;
+        if (!scores || scores.length === 0) {
+            this.state.scoreListEl.innerText = 'No scores yet';
+            return;
+        }
+        this.state.scoreListEl.innerHTML = scores
+            .map((s, i) => `${i + 1}. ${s.name || 'Guest'} — ${s.score}`)
+            .join('<br>');
+    }
+
     initUI() {
         // Start overlay
         const startOverlay = document.createElement('div');
@@ -766,6 +842,24 @@ class DrivingScene extends Scene {
         startTitle.innerText = 'Endless Drive';
         startTitle.style.fontSize = '28px';
         startTitle.style.marginBottom = '12px';
+
+        const nameInput = document.createElement('input');
+        Object.assign(nameInput.style, {
+            padding: '8px 10px',
+            fontSize: '14px',
+            borderRadius: '6px',
+            border: '1px solid #3a3f4b',
+            marginBottom: '12px',
+            fontFamily: 'monospace',
+            background: '#111722',
+            color: '#f5f7ff',
+        });
+        nameInput.placeholder = 'Your name';
+        nameInput.maxLength = 12;
+        nameInput.value = this.state.playerName || 'Guest';
+        nameInput.addEventListener('input', () => {
+            this.state.playerName = nameInput.value || 'Guest';
+        });
 
         const modeRow = document.createElement('div');
         modeRow.style.display = 'flex';
@@ -793,6 +887,7 @@ class DrivingScene extends Scene {
         startBtn.style.color = '#0b1020';
         startBtn.addEventListener('click', () => this.startGame());
         startOverlay.appendChild(startTitle);
+        startOverlay.appendChild(nameInput);
         startOverlay.appendChild(modeRow);
         startOverlay.appendChild(startBtn);
         document.body.appendChild(startOverlay);
@@ -817,6 +912,13 @@ class DrivingScene extends Scene {
         gameOverTitle.style.marginBottom = '8px';
         const gameOverScore = document.createElement('div');
         gameOverScore.style.marginBottom = '14px';
+
+        const scoreList = document.createElement('div');
+        scoreList.style.fontFamily = 'monospace';
+        scoreList.style.fontSize = '14px';
+        scoreList.style.marginBottom = '14px';
+        scoreList.style.maxHeight = '200px';
+        scoreList.style.overflowY = 'auto';
 
         const modeRowOver = document.createElement('div');
         modeRowOver.style.display = 'flex';
@@ -846,6 +948,7 @@ class DrivingScene extends Scene {
 
         gameOverOverlay.appendChild(gameOverTitle);
         gameOverOverlay.appendChild(gameOverScore);
+        gameOverOverlay.appendChild(scoreList);
         gameOverOverlay.appendChild(modeRowOver);
         gameOverOverlay.appendChild(retryBtn);
         document.body.appendChild(gameOverOverlay);
@@ -853,6 +956,7 @@ class DrivingScene extends Scene {
         this.state.startOverlay = startOverlay;
         this.state.gameOverOverlay = gameOverOverlay;
         this.state.gameOverScoreEl = gameOverScore;
+        this.state.scoreListEl = scoreList;
         this.refreshModeButtons();
     }
 
@@ -1034,10 +1138,11 @@ class DrivingScene extends Scene {
             this.state.distance = 0;
             this.state.score = 0;
             this.state.runStartTime = null;
-            this.state.gameState = 'playing';
-            this.state.cameraMode = 'follow';
-            this.state.accumulator = 0;
-            this.state.input.forward = true; // ensure movement starts
+        this.state.gameState = 'playing';
+        this.state.cameraMode = 'follow';
+        this.state.accumulator = 0;
+        this.state.input.forward = true; // ensure movement starts
+        this.persistAndLoadScores(true);
         this.ensureSegments();
         this.updateHUD(0, 1);
         if (this.state.startOverlay) this.state.startOverlay.style.display = 'none';

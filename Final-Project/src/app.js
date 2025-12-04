@@ -6,6 +6,7 @@
  * handles window resizes.
  *
  */
+import 'regenerator-runtime/runtime';
 import { WebGLRenderer, PerspectiveCamera, Vector3, Vector2, ACESFilmicToneMapping, sRGBEncoding, PCFSoftShadowMap } from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
