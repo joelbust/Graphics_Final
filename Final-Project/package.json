@@ -23,6 +23,7 @@
     "deploy": "NODE_OPTIONS=--openssl-legacy-provider npm run prebuild && NODE_OPTIONS=--openssl-legacy-provider webpack --mode production --progress && gh-pages -d build"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.86.0",
     "dat.gui": "^0.7.7",
     "regenerator-runtime": "^0.13.11",
     "three": "^0.116.0",
@@ -31,6 +32,8 @@
   },
   "devDependencies": {
     "@babel/core": "^7.9.6",
+    "@babel/plugin-proposal-nullish-coalescing-operator": "^7.18.6",
+    "@babel/plugin-proposal-optional-chaining": "^7.21.0",
     "@babel/preset-env": "^7.9.6",
     "babel-loader": "^8.1.0",
     "file-loader": "^6.0.0",

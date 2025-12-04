@@ -20,7 +20,28 @@ module.exports = {
             {
                 test: /\.js$/,
                 use: 'babel-loader',
-                exclude: path.resolve(__dirname, './node_modules/'),
+                // Transpile our code plus a few modern ESM deps that ship untranspiled (e.g., supabase/iceberg-js)
+                exclude: (modulePath) => {
+                    const isNodeModule = modulePath.includes('node_modules');
+                    const needsTranspile = /node_modules\/(@supabase|iceberg-js)\//.test(modulePath);
+                    return isNodeModule && !needsTranspile;
+                },
+            },
+            {
+                test: /\.mjs$/,
+                type: 'javascript/auto',
+                include: /node_modules/,
+                use: {
+                    loader: 'babel-loader',
+                    options: {
+                        presets: ['@babel/preset-env'],
+                        plugins: [
+                            '@babel/plugin-proposal-optional-chaining',
+                            '@babel/plugin-proposal-nullish-coalescing-operator',
+                        ],
+                        sourceType: 'unambiguous',
+                    },
+                },
             },
             {
                 test: /\.(jpe?g|png|gif|svg|tga|gltf|babylon|mtl|pcb|pcd|prwm|obj|mat|mp3|ogg)$/i,

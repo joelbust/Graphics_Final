@@ -1,4 +1,5 @@
 import { Scene, Color, Vector3, PlaneGeometry, Mesh, MeshStandardMaterial, FogExp2, SphereGeometry, CircleGeometry, Group, CylinderGeometry } from 'three';
+import { createClient } from '@supabase/supabase-js';
 import { BasicLights } from 'lights';
 import { Car, Ground, Tree, Obstacle, Cone, TrafficCar } from 'objects';
 
@@ -59,6 +60,15 @@ class DrivingScene extends Scene {
             warmupUntil: null,
             warmupDuration: 0,
             touchControls: null,
+            chat: {
+                client: null,
+                channel: null,
+                container: null,
+                list: null,
+                input: null,
+                status: null,
+                messages: [],
+            },
         };
 
         this.background = new Color(0x223247);
@@ -94,6 +104,8 @@ class DrivingScene extends Scene {
         this.initHUD();
         this.initUI();
         this.initTouchControls();
+        this.initChatUI();
+        this.initChatClient();
         this.showStartOverlay();
         this.applyMode(this.state.mode);
     }
@@ -813,14 +825,109 @@ class DrivingScene extends Scene {
     }
 
     renderLeaderboard(scores) {
-        if (!this.state.scoreListEl) return;
-        if (!scores || scores.length === 0) {
-            this.state.scoreListEl.innerText = 'No scores yet';
+        const targets = [this.state.scoreListEl, this.state.startScoreListEl];
+        targets.forEach((el) => {
+            if (!el) return;
+            if (!scores || scores.length === 0) {
+                el.innerText = 'No scores yet';
+                return;
+            }
+            el.innerHTML = scores
+                .map((s, i) => `${i + 1}. ${s.name || 'Guest'} — ${s.score}`)
+                .join('<br>');
+        });
+    }
+
+    initChatClient() {
+        if (this.SUPA_URL.includes('YOUR_PROJECT') || this.SUPA_KEY.includes('YOUR_ANON_KEY')) return;
+        if (!this.state.chat.container) return; // UI not ready yet
+        if (this.state.chat.client) return;
+        const client = createClient(this.SUPA_URL, this.SUPA_KEY);
+        this.state.chat.client = client;
+        this.loadChatMessages();
+        this.subscribeChat();
+    }
+
+    async loadChatMessages() {
+        if (!this.state.chat.client) return;
+        try {
+            const { data, error } = await this.state.chat.client
+                .from('messages')
+                .select('id, user, body, created_at')
+                .order('created_at', { ascending: false })
+                .limit(50);
+            if (!error && data) {
+                // reverse to show oldest first in render
+                this.state.chat.messages = data.reverse();
+                this.renderChatMessages();
+            }
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    subscribeChat() {
+        if (!this.state.chat.client) return;
+        if (this.state.chat.channel) return;
+        const channel = this.state.chat.client
+            .channel('public:messages')
+            .on(
+                'postgres_changes',
+                { event: 'INSERT', schema: 'public', table: 'messages' },
+                (payload) => {
+                    if (payload?.new) {
+                        this.appendChatMessage(payload.new);
+                    }
+                }
+            )
+            .subscribe((status) => {
+                if (this.state.chat.status) {
+                    this.state.chat.status.innerText = status === 'SUBSCRIBED' ? 'live' : status.toLowerCase();
+                }
+            });
+        this.state.chat.channel = channel;
+    }
+
+    async sendChatMessage() {
+        if (!this.state.chat.client || !this.state.chat.input) return;
+        const body = this.state.chat.input.value.trim();
+        if (!body) return;
+        const user = this.state.playerName || 'Guest';
+        this.state.chat.input.value = '';
+        try {
+            await this.state.chat.client.from('messages').insert({ user, body });
+        } catch (e) {
+            if (this.state.chat.status) {
+                this.state.chat.status.innerText = 'error';
+            }
+        }
+    }
+
+    appendChatMessage(msg) {
+        this.state.chat.messages.push(msg);
+        // keep last 100
+        if (this.state.chat.messages.length > 100) {
+            this.state.chat.messages.shift();
+        }
+        this.renderChatMessages();
+    }
+
+    renderChatMessages() {
+        const list = this.state.chat.list;
+        if (!list) return;
+        const msgs = this.state.chat.messages || [];
+        if (msgs.length === 0) {
+            list.innerHTML = '<div style=\"opacity:0.7\">No messages yet</div>';
             return;
         }
-        this.state.scoreListEl.innerHTML = scores
-            .map((s, i) => `${i + 1}. ${s.name || 'Guest'} — ${s.score}`)
-            .join('<br>');
+        list.innerHTML = msgs
+            .map((m) => {
+                const name = (m.user || 'Guest').slice(0, 16);
+                const body = (m.body || '').slice(0, 160);
+                return `<div><span style=\"color:#7dd3fc\">${name}:</span> ${body}</div>`;
+            })
+            .join('');
+        list.scrollTop = list.scrollHeight;
     }
 
     initUI() {
@@ -838,6 +945,32 @@ class DrivingScene extends Scene {
             fontFamily: 'monospace',
             zIndex: '20',
         });
+        // Top-left leaderboard on the start screen
+        const startBoard = document.createElement('div');
+        Object.assign(startBoard.style, {
+            position: 'absolute',
+            top: '14px',
+            right: '14px',
+            padding: '10px 12px',
+            background: 'rgba(6, 10, 16, 0.65)',
+            borderRadius: '8px',
+            border: '1px solid rgba(255,255,255,0.08)',
+            color: '#dfe7ff',
+            fontSize: '13px',
+            lineHeight: '1.4',
+            minWidth: '170px',
+            maxHeight: '200px',
+            overflowY: 'auto',
+            textAlign: 'left',
+        });
+        const startBoardTitle = document.createElement('div');
+        startBoardTitle.innerText = 'Top 10 Scores';
+        startBoardTitle.style.fontWeight = 'bold';
+        startBoardTitle.style.marginBottom = '6px';
+        startBoard.appendChild(startBoardTitle);
+        const startBoardList = document.createElement('div');
+        startBoard.appendChild(startBoardList);
+        startOverlay.appendChild(startBoard);
         const startTitle = document.createElement('div');
         startTitle.innerText = 'Endless Drive';
         startTitle.style.fontSize = '28px';
@@ -957,6 +1090,7 @@ class DrivingScene extends Scene {
         this.state.gameOverOverlay = gameOverOverlay;
         this.state.gameOverScoreEl = gameOverScore;
         this.state.scoreListEl = scoreList;
+        this.state.startScoreListEl = startBoardList;
         this.refreshModeButtons();
     }
 
@@ -1012,6 +1146,127 @@ class DrivingScene extends Scene {
         container.appendChild(right);
         document.body.appendChild(container);
         this.state.touchControls = container;
+    }
+
+    initChatUI() {
+        const container = document.createElement('div');
+        Object.assign(container.style, {
+            position: 'fixed',
+            bottom: '12px',
+            right: '12px',
+            width: '280px',
+            background: 'rgba(8, 10, 16, 0.72)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: '10px',
+            color: '#e8ecf5',
+            fontFamily: 'monospace',
+            fontSize: '12px',
+            zIndex: '30', // above start/game overlays so chat is accessible in the menu
+            display: 'flex',
+            flexDirection: 'column',
+            pointerEvents: 'auto',
+            boxShadow: '0 8px 18px rgba(0,0,0,0.35)',
+        });
+        const header = document.createElement('div');
+        Object.assign(header.style, {
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '8px 10px',
+            background: 'rgba(255,255,255,0.04)',
+            borderBottom: '1px solid rgba(255,255,255,0.05)',
+            borderTopLeftRadius: '10px',
+            borderTopRightRadius: '10px',
+        });
+        const title = document.createElement('div');
+        title.innerText = 'Live Chat';
+        title.style.fontWeight = 'bold';
+        const status = document.createElement('div');
+        status.innerText = 'connecting...';
+        status.style.fontSize = '11px';
+        status.style.opacity = '0.7';
+        header.appendChild(title);
+        header.appendChild(status);
+        const list = document.createElement('div');
+        Object.assign(list.style, {
+            padding: '8px 10px',
+            maxHeight: '130px',
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '4px',
+        });
+        const inputRow = document.createElement('div');
+        Object.assign(inputRow.style, {
+            display: 'flex',
+            padding: '8px 10px',
+            gap: '6px',
+            borderTop: '1px solid rgba(255,255,255,0.06)',
+            marginTop: 'auto',
+        });
+        const input = document.createElement('input');
+        Object.assign(input.style, {
+            flex: '1',
+            padding: '6px 8px',
+            background: '#0f1421',
+            border: '1px solid #243044',
+            color: '#e8ecf5',
+            borderRadius: '6px',
+            fontFamily: 'monospace',
+            fontSize: '12px',
+        });
+        input.placeholder = 'Message...';
+        const sendBtn = document.createElement('button');
+        Object.assign(sendBtn.style, {
+            padding: '6px 10px',
+            background: '#38bdf8',
+            border: 'none',
+            borderRadius: '6px',
+            color: '#0b1020',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+        });
+        sendBtn.innerText = 'Send';
+        sendBtn.addEventListener('click', () => this.sendChatMessage());
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                this.sendChatMessage();
+            }
+        });
+        inputRow.appendChild(input);
+        inputRow.appendChild(sendBtn);
+
+        const toggleBtn = document.createElement('button');
+        Object.assign(toggleBtn.style, {
+            marginLeft: '8px',
+            padding: '4px 8px',
+            background: 'rgba(255,255,255,0.08)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: '6px',
+            color: '#e8ecf5',
+            cursor: 'pointer',
+            fontSize: '11px',
+        });
+        toggleBtn.innerText = 'Hide';
+        toggleBtn.addEventListener('click', () => {
+            const isHidden = list.style.display === 'none';
+            list.style.display = isHidden ? 'flex' : 'none';
+            inputRow.style.display = isHidden ? 'flex' : 'none';
+            toggleBtn.innerText = isHidden ? 'Hide' : 'Show';
+            container.style.height = isHidden ? '' : 'auto';
+        });
+        header.appendChild(toggleBtn);
+
+        container.appendChild(header);
+        container.appendChild(list);
+        container.appendChild(inputRow);
+        document.body.appendChild(container);
+
+        this.state.chat.container = container;
+        this.state.chat.list = list;
+        this.state.chat.input = input;
+        this.state.chat.status = status;
     }
 
     createModeButton(label, mode) {
@@ -1108,6 +1363,8 @@ class DrivingScene extends Scene {
         this.car.state.velocity = 0;
         this.car.state.heading = 0;
         this.car.position.copy(this.startPosition);
+        // refresh leaderboard when returning to menu
+        this.persistAndLoadScores(true);
     }
 
     showGameOverOverlay() {
