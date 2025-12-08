@@ -1,3 +1,4 @@
+// Core driving scene: spawns road segments, traffic, UI, and handles input/score/state.
 import { Scene, Color, Vector3, PlaneGeometry, Mesh, MeshStandardMaterial, FogExp2, SphereGeometry, CircleGeometry, Group, CylinderGeometry } from 'three';
 import { createClient } from '@supabase/supabase-js';
 import { BasicLights } from 'lights';
@@ -69,7 +70,15 @@ class DrivingScene extends Scene {
                 status: null,
                 messages: [],
             },
+            shadowsEnabled: false,
+            menuOrbitAngle: -Math.PI / 6,
+            menuOrbitRadius: 10,
+            menuOrbitDragging: false,
+            menuOrbitLastX: 0,
+            carColor: 0xff6347,
+            colorOverlay: null,
         };
+        this.colorOptions = [0xff6347, 0x4a8bd7, 0x7bd38a, 0xf0c94b, 0xb56cff, 0xff8b6b];
 
         this.background = new Color(0x223247);
         this.fog = new FogExp2(this.background, 0.015);
@@ -82,11 +91,16 @@ class DrivingScene extends Scene {
         this.lights = lights;
 
         car.position.copy(this.startPosition);
+        car.setBodyColor(this.state.carColor);
         lights.position.set(0, 5, 0);
 
         this.add(ground, car, lights);
         this.car = car;
         this.ground = ground;
+        if (!this.state.shadowsEnabled) {
+            this.setShadows(car, false);
+            this.setShadows(ground, false);
+        }
 
         this.sun = this.createSkyBody(1.6, new Color(0xfff4b8));
         this.moon = this.createSkyBody(1.3, new Color(0xcfd8ff));
@@ -108,6 +122,16 @@ class DrivingScene extends Scene {
         this.initChatClient();
         this.showStartOverlay();
         this.applyMode(this.state.mode);
+    }
+
+    setShadows(object, enabled) {
+        if (!object) return;
+        object.traverse((child) => {
+            if (child.isMesh) {
+                child.castShadow = enabled;
+                child.receiveShadow = enabled;
+            }
+        });
     }
 
     ensureSegments() {
@@ -200,6 +224,11 @@ class DrivingScene extends Scene {
         obstacles.push(...barriers);
         const trees = this.spawnTreesInRange(startZ, endZ);
         const crossData = isIntersection ? this.spawnCrossRoad(startZ, endZ, roadWidth) : null;
+        if (!this.state.shadowsEnabled) {
+            [...obstacles, ...trees, ...(crossData ? [crossData.crossRoad, ...(crossData.crossLines || []), ...(crossData.crossSideLines || [])] : [])].forEach((obj) =>
+                this.setShadows(obj, false)
+            );
+        }
         const midZ = (startZ + endZ) / 2;
         return {
             index,
@@ -227,7 +256,7 @@ class DrivingScene extends Scene {
         const laneXs = [-6, -2, 2, 6];
         const minZ = startZ + 6;
         const maxZ = endZ - 6;
-        const obstacleChance = 0.35;
+        const obstacleChance = 0.32;
         const minSeparation = 7;
 
         // Keep starting area clear
@@ -277,7 +306,7 @@ class DrivingScene extends Scene {
 
     spawnTreesInRange(startZ, endZ) {
         const trees = [];
-        const spacing = 30;
+        const spacing = 45;
         const offsetX = 11;
         for (let z = startZ; z <= endZ; z += spacing) {
             const jitter = (Math.random() - 0.5) * 3;
@@ -473,11 +502,8 @@ class DrivingScene extends Scene {
     }
 
     spawnTrafficCars(startZ, endZ, width = this.state.roadWidth, playerSpeed = 0, playerEta = 2) {
-        // Occasionally skip traffic so some intersections are empty
-        if (Math.random() < 0.45) return [];
-
         const cars = [];
-        const count = 1 + Math.floor(Math.random() * 4); // 1-4 cars
+        const count = 1 + Math.floor(Math.random() * 3); // 1-3 cars max
         const midZ = (startZ + endZ) / 2;
         const crossLength = width * 8;
         const baseSpeed = 5.2 + Math.random() * 1.3; // ~5.2–6.5
@@ -487,10 +513,10 @@ class DrivingScene extends Scene {
             // Try to time the crossing to the player's arrival
             const carSpeed = baseSpeed + speedBoost;
             // Jitter timing so some are early/late when you reach the intersection
-            const timingJitter = (Math.random() - 0.5) * 1.8; // ~-0.9s to +0.9s
+            const timingJitter = (Math.random() - 0.5) * 2.6; // wider spread
             const eta = Math.max(0.25, playerEta + timingJitter);
             // Give them plenty of runway so they visibly drive in
-            const desiredDist = Math.max(12, Math.min(crossLength / 2 + 40, carSpeed * Math.max(0.6, eta + 0.8)));
+            const desiredDist = Math.max(12, Math.min(crossLength / 2 + 40, carSpeed * Math.max(0.5, eta + 1.2)));
             const startX = dir > 0 ? -desiredDist : desiredDist;
             const zOffset = (Math.random() - 0.5) * 8;
             const trafficCar = new TrafficCar({
@@ -500,6 +526,7 @@ class DrivingScene extends Scene {
             });
             trafficCar.position.set(startX, 0, midZ + zOffset);
             trafficCar.setHeadLights(this.state.mode === 'night');
+            if (!this.state.shadowsEnabled) this.setShadows(trafficCar, false);
             this.add(trafficCar);
             cars.push(trafficCar);
         }
@@ -682,6 +709,26 @@ class DrivingScene extends Scene {
                     break;
             }
         });
+
+        // Simple orbit control for menu view (drag horizontally)
+        const onPointerDown = (e) => {
+            if (this.state.gameState !== 'idle') return;
+            this.state.menuOrbitDragging = true;
+            this.state.menuOrbitLastX = e.clientX;
+        };
+        const onPointerMove = (e) => {
+            if (!this.state.menuOrbitDragging) return;
+            const dx = e.clientX - this.state.menuOrbitLastX;
+            this.state.menuOrbitLastX = e.clientX;
+            this.state.menuOrbitAngle += dx * 0.005;
+        };
+        const onPointerUp = () => {
+            this.state.menuOrbitDragging = false;
+        };
+        window.addEventListener('pointerdown', onPointerDown);
+        window.addEventListener('pointermove', onPointerMove);
+        window.addEventListener('pointerup', onPointerUp);
+        window.addEventListener('pointerleave', onPointerUp);
     }
 
     addToUpdateList(object) {
@@ -732,20 +779,30 @@ class DrivingScene extends Scene {
             speedMultiplier = Math.min(this.state.maxSpeedMultiplier, 1 + elapsed * 0.02); // ramps up but capped
             this.car.setSpeedMultiplier(speedMultiplier);
 
-            this.state.distance += Math.abs(this.car.state.velocity) * delta;
-            this.state.score = Math.floor(this.state.distance);
+            const speedNow = Math.abs(this.car.state.velocity);
+            const maxSpeed = this.car.state.maxSpeed || 30;
+            const speedBonus = 1 + speedNow / maxSpeed;
+            const ramp = Math.min(1, elapsed / 5); // slower gain first 5s
+            this.state.distance += speedNow * delta;
+            this.state.score += speedNow * delta * speedBonus * ramp;
         } else {
             this.car.state.velocity = 0;
         }
 
         if (camera) {
             if (this.state.cameraMode === 'menu') {
-                // Front/side view of the car for the menu (zoomed out)
-                const offset = new Vector3(3.5, 3.2, -8).applyAxisAngle(new Vector3(0, 1, 0), this.car.state.heading);
-                const desired = new Vector3().copy(this.car.position).add(offset);
-                camera.position.lerp(desired, 0.06);
+                // Orbitable menu view
+                const yHeight = 3.5;
+                const radius = this.state.menuOrbitRadius;
+                const angle = this.state.menuOrbitAngle;
+                const desired = new Vector3(
+                    this.car.position.x + Math.cos(angle) * radius,
+                    this.car.position.y + yHeight,
+                    this.car.position.z + Math.sin(angle) * radius
+                );
+                camera.position.lerp(desired, 0.08);
                 const lookTarget = this.car.position.clone().add(new Vector3(0, 1, 0));
-                cameraTarget.lerp(lookTarget, 0.1);
+                cameraTarget.lerp(lookTarget, 0.12);
                 camera.lookAt(cameraTarget);
             } else {
                 // Smooth follow camera with a bit of height and trailing distance
@@ -785,7 +842,7 @@ class DrivingScene extends Scene {
 
     updateHUD(score, speedMultiplier) {
         if (!this.state.hudEl) return;
-        this.state.hudEl.innerText = `Score: ${score} | Speed x${speedMultiplier.toFixed(2)}`;
+        this.state.hudEl.innerText = `Score: ${Math.floor(score)} | Speed x${speedMultiplier.toFixed(2)}`;
     }
 
     async persistAndLoadScores(skipSave = false) {
@@ -1019,10 +1076,22 @@ class DrivingScene extends Scene {
         startBtn.style.background = '#38bdf8';
         startBtn.style.color = '#0b1020';
         startBtn.addEventListener('click', () => this.startGame());
+        const customizeBtn = document.createElement('button');
+        customizeBtn.innerText = 'Customize Car';
+        customizeBtn.style.padding = '8px 14px';
+        customizeBtn.style.fontSize = '14px';
+        customizeBtn.style.cursor = 'pointer';
+        customizeBtn.style.borderRadius = '6px';
+        customizeBtn.style.border = 'none';
+        customizeBtn.style.background = '#4ade80';
+        customizeBtn.style.color = '#0b1020';
+        customizeBtn.style.marginTop = '10px';
+        customizeBtn.addEventListener('click', () => this.showColorOverlay());
         startOverlay.appendChild(startTitle);
         startOverlay.appendChild(nameInput);
         startOverlay.appendChild(modeRow);
         startOverlay.appendChild(startBtn);
+        startOverlay.appendChild(customizeBtn);
         document.body.appendChild(startOverlay);
 
         // Game over overlay
@@ -1092,6 +1161,7 @@ class DrivingScene extends Scene {
         this.state.scoreListEl = scoreList;
         this.state.startScoreListEl = startBoardList;
         this.refreshModeButtons();
+        this.initColorOverlay();
     }
 
     initTouchControls() {
@@ -1142,6 +1212,52 @@ class DrivingScene extends Scene {
         Object.assign(left.style, { position: 'absolute', top: '50%', left: '20px', transform: 'translateY(-50%)' });
         Object.assign(right.style, { position: 'absolute', top: '50%', right: '20px', transform: 'translateY(-50%)' });
 
+        // Full-screen invisible tap zones for phone users
+        const leftZone = document.createElement('div');
+        Object.assign(leftZone.style, {
+            position: 'absolute',
+            inset: '0 50% 0 0',
+            pointerEvents: 'auto',
+            touchAction: 'none',
+            background: 'transparent',
+        });
+        const rightZone = document.createElement('div');
+        Object.assign(rightZone.style, {
+            position: 'absolute',
+            inset: '0 0 0 50%',
+            pointerEvents: 'auto',
+            touchAction: 'none',
+            background: 'transparent',
+        });
+
+        const leftStart = (e) => {
+            e.preventDefault();
+            this.state.input.left = true;
+        };
+        const leftEnd = (e) => {
+            e.preventDefault();
+            this.state.input.left = false;
+        };
+        const rightStart = (e) => {
+            e.preventDefault();
+            this.state.input.right = true;
+        };
+        const rightEnd = (e) => {
+            e.preventDefault();
+            this.state.input.right = false;
+        };
+
+        ['touchstart'].forEach((evt) => {
+            leftZone.addEventListener(evt, leftStart, { passive: false });
+            rightZone.addEventListener(evt, rightStart, { passive: false });
+        });
+        ['touchend', 'touchcancel'].forEach((evt) => {
+            leftZone.addEventListener(evt, leftEnd, { passive: false });
+            rightZone.addEventListener(evt, rightEnd, { passive: false });
+        });
+
+        container.appendChild(leftZone);
+        container.appendChild(rightZone);
         container.appendChild(left);
         container.appendChild(right);
         document.body.appendChild(container);
@@ -1269,6 +1385,102 @@ class DrivingScene extends Scene {
         this.state.chat.status = status;
     }
 
+    initColorOverlay() {
+        const overlay = document.createElement('div');
+        Object.assign(overlay.style, {
+            position: 'fixed',
+            top: '12px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'transparent',
+            display: 'none',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexDirection: 'column',
+            color: '#f5f7ff',
+            fontFamily: 'monospace',
+            zIndex: '25',
+            pointerEvents: 'none',
+        });
+        const panel = document.createElement('div');
+        Object.assign(panel.style, {
+            background: '#0f1421',
+            padding: '10px 14px',
+            borderRadius: '10px',
+            border: '1px solid rgba(255,255,255,0.08)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+            minWidth: '240px',
+            alignItems: 'center',
+            pointerEvents: 'auto',
+            boxShadow: '0 6px 14px rgba(0,0,0,0.35)',
+        });
+        const title = document.createElement('div');
+        title.innerText = 'Pick Car Color';
+        title.style.fontSize = '15px';
+        title.style.fontWeight = 'bold';
+
+        const swatchRow = document.createElement('div');
+        Object.assign(swatchRow.style, {
+            display: 'flex',
+            gap: '10px',
+            flexWrap: 'wrap',
+            justifyContent: 'center',
+        });
+        this.colorOptions.forEach((hex) => {
+            const sw = document.createElement('button');
+            Object.assign(sw.style, {
+                width: '34px',
+                height: '34px',
+                borderRadius: '50%',
+                border: '2px solid rgba(255,255,255,0.18)',
+                background: `#${hex.toString(16).padStart(6, '0')}`,
+                cursor: 'pointer',
+            });
+            sw.addEventListener('click', () => {
+                this.state.carColor = hex;
+                this.car.setBodyColor(hex);
+            });
+            swatchRow.appendChild(sw);
+        });
+
+        const backBtn = document.createElement('button');
+        backBtn.innerText = 'Back';
+        Object.assign(backBtn.style, {
+            padding: '8px 14px',
+            fontSize: '14px',
+            cursor: 'pointer',
+            borderRadius: '6px',
+            border: 'none',
+            background: '#f97316',
+            color: '#0b1020',
+            marginTop: '4px',
+        });
+        backBtn.addEventListener('click', () => this.hideColorOverlay());
+
+        panel.appendChild(title);
+        panel.appendChild(swatchRow);
+        panel.appendChild(backBtn);
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+        this.state.colorOverlay = overlay;
+    }
+
+    showColorOverlay() {
+        if (this.state.colorOverlay) this.state.colorOverlay.style.display = 'flex';
+        if (this.state.startOverlay) this.state.startOverlay.style.display = 'none';
+        this.state.gameState = 'idle';
+        this.state.cameraMode = 'menu';
+    }
+
+    hideColorOverlay() {
+        if (this.state.colorOverlay) this.state.colorOverlay.style.display = 'none';
+        if (this.state.startOverlay) this.state.startOverlay.style.display = 'flex';
+        this.state.gameState = 'idle';
+        this.state.cameraMode = 'menu';
+    }
+
     createModeButton(label, mode) {
         const btn = document.createElement('button');
         btn.innerText = label;
@@ -1355,6 +1567,7 @@ class DrivingScene extends Scene {
         if (this.state.gameOverOverlay) this.state.gameOverOverlay.style.display = 'none';
         this.state.gameState = 'idle';
         this.state.cameraMode = 'menu';
+        this.state.menuOrbitAngle = -Math.PI / 6;
         // Reset input so the car stays put in menu view
         this.state.input.forward = false;
         this.state.input.backward = false;
@@ -1363,6 +1576,7 @@ class DrivingScene extends Scene {
         this.car.state.velocity = 0;
         this.car.state.heading = 0;
         this.car.position.copy(this.startPosition);
+        if (this.state.colorOverlay) this.state.colorOverlay.style.display = 'none';
         // refresh leaderboard when returning to menu
         this.persistAndLoadScores(true);
     }
@@ -1371,7 +1585,7 @@ class DrivingScene extends Scene {
         if (this.state.gameOverOverlay) {
             this.state.gameOverOverlay.style.display = 'flex';
             if (this.state.gameOverScoreEl) {
-                this.state.gameOverScoreEl.innerText = `Score: ${this.state.score}`;
+                this.state.gameOverScoreEl.innerText = `Score: ${Math.floor(this.state.score)}`;
             }
         }
     }
@@ -1399,6 +1613,7 @@ class DrivingScene extends Scene {
         this.state.cameraMode = 'follow';
         this.state.accumulator = 0;
         this.state.input.forward = true; // ensure movement starts
+        this.car.setBodyColor(this.state.carColor);
         this.persistAndLoadScores(true);
         this.ensureSegments();
         this.updateHUD(0, 1);

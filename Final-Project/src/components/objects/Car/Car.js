@@ -1,3 +1,4 @@
+// Player car with movement, dust, headlights, and simple livery accents.
 import { Group, BoxGeometry, MeshStandardMaterial, Mesh, CylinderGeometry, CircleGeometry, MeshBasicMaterial, Vector3, SpotLight } from 'three';
 
 class Car extends Group {
@@ -23,22 +24,47 @@ class Car extends Group {
         };
 
         this.autoDrive = true;
+        this.liveryPieces = [];
 
         // Body pieces
-        const bodyMaterial = new MeshStandardMaterial({ color: 0xff6347, metalness: 0.18, roughness: 0.52 });
-        const accentMaterial = new MeshStandardMaterial({ color: 0x1a1c1f, metalness: 0.5, roughness: 0.38 });
-        const trimMaterial = new MeshStandardMaterial({ color: 0xd7d9de, metalness: 0.6, roughness: 0.35 });
+        const bodyMaterial = new MeshStandardMaterial({ color: 0xff6347, metalness: 0.28, roughness: 0.35 });
+        const accentMaterial = new MeshStandardMaterial({ color: 0x1a1c1f, metalness: 0.4, roughness: 0.25 });
+        const trimMaterial = new MeshStandardMaterial({ color: 0xd7d9de, metalness: 0.55, roughness: 0.22 });
+
+        const glassMat = new MeshStandardMaterial({ color: 0x8ea2b5, metalness: 0.05, roughness: 0.12, opacity: 0.7, transparent: true });
+
+        this.bodyMaterial = bodyMaterial;
 
         const chassis = new Mesh(new BoxGeometry(1.9, 0.5, 3.2), bodyMaterial);
         chassis.castShadow = true;
         chassis.receiveShadow = true;
         chassis.position.y = 0.55;
 
-        const cabin = new Mesh(new BoxGeometry(1.4, 0.6, 1.4), new MeshStandardMaterial({ color: 0xf4f5f7, metalness: 0.05, roughness: 0.2 }));
+        // Cabin: body color with embedded glass panels
+        const cabin = new Mesh(new BoxGeometry(1.35, 0.5, 1.45), bodyMaterial);
         cabin.castShadow = true;
         cabin.receiveShadow = true;
-        cabin.position.set(0, 0.95, -0.15);
-        cabin.scale.set(0.92, 1, 0.95); // slight taper for roofline
+        cabin.position.set(0, 0.92, -0.1);
+        cabin.scale.set(0.9, 1, 0.9);
+        this.cabin = cabin;
+
+        const roofPanel = new Mesh(new BoxGeometry(1.2, 0.08, 1.0), bodyMaterial);
+        roofPanel.position.set(0, 1.06, -0.05);
+        this.roofPanel = roofPanel;
+
+        const frontGlass = new Mesh(new BoxGeometry(1.22, 0.32, 0.03), glassMat);
+        frontGlass.position.set(0, 0.99, -0.78);
+        frontGlass.rotation.x = 0.25;
+
+        const rearGlass = new Mesh(new BoxGeometry(1.05, 0.28, 0.03), glassMat);
+        rearGlass.position.set(0, 0.99, 0.55);
+        rearGlass.rotation.x = -0.12;
+
+        const sideGlassGeo = new BoxGeometry(0.03, 0.26, 0.9);
+        const sideGlassL = new Mesh(sideGlassGeo, glassMat);
+        sideGlassL.position.set(-0.6, 0.97, -0.05);
+        const sideGlassR = sideGlassL.clone();
+        sideGlassR.position.x = 0.6;
 
         const hood = new Mesh(new BoxGeometry(1.6, 0.25, 1.2), bodyMaterial);
         hood.castShadow = true;
@@ -101,9 +127,9 @@ class Car extends Group {
         const spokeGeometry = new BoxGeometry(0.05, 0.05, 0.24);
         const tireBandGeometry = new CylinderGeometry(0.41, 0.41, 0.012, 24);
         tireBandGeometry.rotateZ(Math.PI / 2);
-        const wheelMaterial = new MeshStandardMaterial({ color: 0x0f0f10, metalness: 0.35, roughness: 0.9 });
-        const rimMaterial = new MeshStandardMaterial({ color: 0xc0c5ce, metalness: 0.8, roughness: 0.25 });
-        const spokeMaterial = new MeshStandardMaterial({ color: 0xf2f2f2, metalness: 0.6, roughness: 0.35 });
+        const wheelMaterial = new MeshStandardMaterial({ color: 0x0f0f10, metalness: 0.45, roughness: 0.78 });
+        const rimMaterial = new MeshStandardMaterial({ color: 0xc0c5ce, metalness: 0.85, roughness: 0.2 });
+        const spokeMaterial = new MeshStandardMaterial({ color: 0xf2f2f2, metalness: 0.65, roughness: 0.3 });
 
         const frontPivotPositions = [
             [-0.9, 0.3, -1.2],
@@ -121,6 +147,7 @@ class Car extends Group {
         this.dustPuffs = [];
         this.dustTimer = 0;
         this.headLights = this.createHeadLights();
+        this.bodyMaterial = bodyMaterial;
 
         frontPivotPositions.forEach(([x, y, z]) => {
             const pivot = new Group();
@@ -157,11 +184,20 @@ class Car extends Group {
             this.add(wheelGroup);
         });
 
+        const liveryPieces = this.createLivery(bodyMaterial.color);
+        this.liveryPieces = liveryPieces;
+
         this.add(
             chassis,
             cabin,
+            roofPanel,
+            frontGlass,
+            rearGlass,
+            sideGlassL,
+            sideGlassR,
             hood,
             spoiler,
+            ...liveryPieces,
             mirrorL,
             mirrorR,
             grille,
@@ -264,6 +300,56 @@ class Car extends Group {
         });
 
         this.updateDust(delta);
+    }
+
+    setBodyColor(colorHex) {
+        this.bodyMaterial.color.setHex(colorHex);
+        this.cabin.material.color.setHex(colorHex);
+        this.roofPanel.material.color.setHex(colorHex);
+        this.refreshLivery(colorHex);
+    }
+
+    refreshLivery(colorHex) {
+        if (this.liveryPieces.length) {
+            this.liveryPieces.forEach((m) => this.remove(m));
+            this.liveryPieces = [];
+        }
+        const newPieces = this.createLivery(new MeshStandardMaterial({ color: colorHex, metalness: this.bodyMaterial.metalness, roughness: this.bodyMaterial.roughness }).color);
+        this.liveryPieces = newPieces;
+        newPieces.forEach((m) => this.add(m));
+    }
+
+    // Simple “texture” pass: thin colored strips to break up flat panels
+    createLivery(baseColor) {
+        const accents = [];
+        const accentMat = new MeshStandardMaterial({
+            color: baseColor.clone().offsetHSL(0, 0, -0.08),
+            metalness: 0.35,
+            roughness: 0.28,
+            emissive: 0x0,
+        });
+        // Side stripe
+        const sideGeo = new BoxGeometry(0.08, 0.18, 2.0);
+        const sideL = new Mesh(sideGeo, accentMat);
+        sideL.position.set(-0.98, 0.6, 0.1);
+        const sideR = sideL.clone();
+        sideR.position.x = 0.98;
+        accents.push(sideL, sideR);
+        // Hood stripe
+        const hoodGeo = new BoxGeometry(1.0, 0.02, 0.5);
+        const hoodStripe = new Mesh(hoodGeo, accentMat);
+        hoodStripe.position.set(0, 0.92, -1.0);
+        accents.push(hoodStripe);
+        // Roof panel
+        const roofGeo = new BoxGeometry(0.9, 0.02, 0.9);
+        const roofStripe = new Mesh(roofGeo, accentMat);
+        roofStripe.position.set(0, 1.08, 0.15);
+        accents.push(roofStripe);
+        accents.forEach((m) => {
+            m.castShadow = false;
+            m.receiveShadow = false;
+        });
+        return accents;
     }
 
     spawnDustPuff() {

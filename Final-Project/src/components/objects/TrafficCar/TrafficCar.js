@@ -1,3 +1,4 @@
+// AI traffic car model with headlights and livery accents.
 import { Group, Mesh, BoxGeometry, CylinderGeometry, MeshStandardMaterial, SpotLight } from 'three';
 
 class TrafficCar extends Group {
@@ -28,12 +29,12 @@ class TrafficCar extends Group {
             { body: 0xf0c94b, accent: 0x2a1f14, trim: 0xf6e8b5 },
         ];
         const palette = palettes[Math.floor(Math.random() * palettes.length)];
-        const bodyMat = new MeshStandardMaterial({ color: palette.body, roughness: 0.52, metalness: 0.18 });
-        const accentMat = new MeshStandardMaterial({ color: palette.accent, roughness: 0.4, metalness: 0.38 });
-        const trimMat = new MeshStandardMaterial({ color: palette.trim, roughness: 0.35, metalness: 0.6 });
-        const glassMat = new MeshStandardMaterial({ color: accent, roughness: 0.2, metalness: 0.05 });
-        const wheelMat = new MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.85, metalness: 0.1 });
-        const rimMat = new MeshStandardMaterial({ color: 0xc0c5ce, roughness: 0.25, metalness: 0.85 });
+        const bodyMat = new MeshStandardMaterial({ color: palette.body, roughness: 0.4, metalness: 0.25 });
+        const accentMat = new MeshStandardMaterial({ color: palette.accent, roughness: 0.32, metalness: 0.42 });
+        const trimMat = new MeshStandardMaterial({ color: palette.trim, roughness: 0.28, metalness: 0.62 });
+        const glassMat = new MeshStandardMaterial({ color: 0x8ea2b5, roughness: 0.12, metalness: 0.08, opacity: 0.7, transparent: true });
+        const wheelMat = new MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.8, metalness: 0.16 });
+        const rimMat = new MeshStandardMaterial({ color: 0xc0c5ce, roughness: 0.2, metalness: 0.88 });
 
         const chassisHeight = height * 0.42;
         const chassis = new Mesh(new BoxGeometry(1.9, 0.5, 3.2), bodyMat);
@@ -41,11 +42,28 @@ class TrafficCar extends Group {
         chassis.receiveShadow = true;
         chassis.position.y = 0.55;
 
-        const cabin = new Mesh(new BoxGeometry(1.4, 0.6, 1.4), new MeshStandardMaterial({ color: 0xf4f5f7, metalness: 0.05, roughness: 0.2 }));
+        const cabin = new Mesh(new BoxGeometry(1.35, 0.5, 1.45), bodyMat);
         cabin.castShadow = true;
         cabin.receiveShadow = true;
-        cabin.position.set(0, 0.95, -0.15);
-        cabin.scale.set(0.92, 1, 0.95);
+        cabin.position.set(0, 0.92, -0.1);
+        cabin.scale.set(0.9, 1, 0.9);
+
+        const roofPanel = new Mesh(new BoxGeometry(1.2, 0.08, 1.0), bodyMat);
+        roofPanel.position.set(0, 1.06, -0.05);
+
+        const frontGlass = new Mesh(new BoxGeometry(1.22, 0.32, 0.03), glassMat);
+        frontGlass.position.set(0, 0.99, -0.78);
+        frontGlass.rotation.x = 0.25;
+
+        const rearGlass = new Mesh(new BoxGeometry(1.05, 0.28, 0.03), glassMat);
+        rearGlass.position.set(0, 0.99, 0.55);
+        rearGlass.rotation.x = -0.12;
+
+        const sideGlassGeo = new BoxGeometry(0.03, 0.26, 0.9);
+        const sideGlassL = new Mesh(sideGlassGeo, glassMat);
+        sideGlassL.position.set(-0.6, 0.97, -0.05);
+        const sideGlassR = sideGlassL.clone();
+        sideGlassR.position.x = 0.6;
 
         const hood = new Mesh(new BoxGeometry(1.6, 0.25, 1.2), bodyMat);
         hood.castShadow = true;
@@ -128,26 +146,34 @@ class TrafficCar extends Group {
             return group;
         });
 
-        const lightGeo = new BoxGeometry(0.2, 0.12, 0.08);
-        const headMat = new MeshStandardMaterial({ color: 0xfff3d0, emissive: 0xfff3d0, emissiveIntensity: 0.8, roughness: 0.4, metalness: 0.05 });
-        const tailMat = new MeshStandardMaterial({ color: 0xff3b2e, emissive: 0xff3b2e, emissiveIntensity: 1.0, roughness: 0.5, metalness: 0.05 });
-        const headlights = [-0.4, 0.4].map((x) => {
-            const l = new Mesh(lightGeo, headMat);
-            l.position.set(x, height * 0.55, -length / 2 + 0.15);
-            return l;
+        const headLightMaterial = new MeshStandardMaterial({ color: 0xfff6d5, emissive: 0xfff6d5, emissiveIntensity: 0.8, roughness: 0.4, metalness: 0.05 });
+        const tailLightMaterial = new MeshStandardMaterial({ color: 0xff3b2e, emissive: 0xff3b2e, emissiveIntensity: 1.0, roughness: 0.5, metalness: 0.05 });
+        const headLight = new BoxGeometry(0.3, 0.15, 0.1);
+        const tailLight = new BoxGeometry(0.28, 0.15, 0.08);
+
+        const headlights = [-0.45, 0.45].map((x) => {
+            const light = new Mesh(headLight, headLightMaterial);
+            light.position.set(x, 0.73, -1.65);
+            return light;
         });
-        const taillights = [-0.38, 0.38].map((x) => {
-            const l = new Mesh(lightGeo, tailMat);
-            l.position.set(x, height * 0.5, length / 2 - 0.12);
-            return l;
+        const taillights = [-0.42, 0.42].map((x) => {
+            const light = new Mesh(tailLight, tailLightMaterial);
+            light.position.set(x, 0.65, 1.6);
+            return light;
         });
 
         this.headLights = this.createHeadLights();
         this.add(
             chassis,
             cabin,
+            roofPanel,
+            frontGlass,
+            rearGlass,
+            sideGlassL,
+            sideGlassR,
             hood,
             spoiler,
+            ...this.createLivery(bodyMat.color),
             mirrorL,
             mirrorR,
             grille,
@@ -186,6 +212,37 @@ class TrafficCar extends Group {
             this.add(l.target);
         });
         return lights;
+    }
+
+    createLivery(baseColor) {
+        const accents = [];
+        const accentMat = new MeshStandardMaterial({
+            color: baseColor.clone().offsetHSL(0, 0, -0.1),
+            metalness: 0.3,
+            roughness: 0.25,
+        });
+        // Side stripe
+        const sideGeo = new BoxGeometry(0.07, 0.16, 1.8);
+        const sideL = new Mesh(sideGeo, accentMat);
+        sideL.position.set(-0.98, 0.58, 0.05);
+        const sideR = sideL.clone();
+        sideR.position.x = 0.98;
+        accents.push(sideL, sideR);
+        // Hood highlight
+        const hoodGeo = new BoxGeometry(0.9, 0.02, 0.45);
+        const hoodStripe = new Mesh(hoodGeo, accentMat);
+        hoodStripe.position.set(0, 0.86, -0.95);
+        accents.push(hoodStripe);
+        // Trunk panel
+        const trunkGeo = new BoxGeometry(0.9, 0.02, 0.5);
+        const trunkStripe = new Mesh(trunkGeo, accentMat);
+        trunkStripe.position.set(0, 0.92, 1.1);
+        accents.push(trunkStripe);
+        accents.forEach((m) => {
+            m.castShadow = false;
+            m.receiveShadow = false;
+        });
+        return accents;
     }
 
     setHeadLights(on) {

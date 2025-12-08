@@ -17,13 +17,13 @@ class Obstacle extends Group {
         const topGeometry = new BoxGeometry(width * 0.9, height * 0.35, depth * 0.9);
         const baseMaterial = new MeshStandardMaterial({
             color: new Color(color),
-            roughness: 0.85,
-            metalness: 0.08,
+            roughness: 0.65,
+            metalness: 0.15,
         });
         const topMaterial = new MeshStandardMaterial({
             color: new Color(0x69625b),
-            roughness: 0.7,
-            metalness: 0.12,
+            roughness: 0.55,
+            metalness: 0.18,
         });
 
         const base = new Mesh(baseGeometry, baseMaterial);
